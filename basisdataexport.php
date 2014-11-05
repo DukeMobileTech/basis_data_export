@@ -37,6 +37,10 @@
  *  
 */
 require_once(dirname(__FILE__) . '/BasisExport.class.php'); 
+//Set time zone
+date_default_timezone_set('America/New_York'); 
+//Set memory allowed
+ini_set('memory_limit','512M');
 
 ///////////////////////////////////////////////////////
 // Settings
@@ -46,7 +50,7 @@ require_once(dirname(__FILE__) . '/BasisExport.class.php');
 // will require inputting these values manually each time the script is run.
 define('BASIS_USERNAME', '');
 define('BASIS_PASSWORD', '');
-define('BASIS_EXPORT_FORMAT', 'json');
+define('BASIS_EXPORT_FORMAT', 'csv');
 
 // Enable/disable debug mode
 define('DEBUG', false);
@@ -78,25 +82,24 @@ $basis->debug = DEBUG;
 
 // Query Basis API for biometric data
 try {
-    $basis->getMetrics($settings['basis_export_date'], $settings['basis_export_format']);
+    $basis->getMetrics($settings['basis_export_start_date'], $settings['basis_export_end_date'], $settings['basis_export_format']);
 } catch (Exception $e) {
     echo 'Exception: ',  $e->getMessage(), "\n";
 }
 
 // Query Basis API for sleep data
 try {
-    $basis->getSleep($settings['basis_export_date'], $settings['basis_export_format']);
+    $basis->getSleep($settings['basis_export_start_date'], $settings['basis_export_end_date'], $settings['basis_export_format']);
 } catch (Exception $e) {
     echo 'Exception: ',  $e->getMessage(), "\n";
 }
 
 // Query Basis API for activity data
 try {
-    $basis->getActivities($settings['basis_export_date'], $settings['basis_export_format']);
+    $basis->getActivities($settings['basis_export_start_date'], $settings['basis_export_end_date'], $settings['basis_export_format']);
 } catch (Exception $e) {
     echo 'Exception: ',  $e->getMessage(), "\n";
 }
-
 
 /**
 * Take parameters via command-line args
@@ -170,7 +173,8 @@ function runInteractive()
 
 //    $basis_password_mask = (!)
 
-    $basis_export_date = date('Y-m-d', strtotime('now', time()));
+    $basis_export_start_date = date('Y-m-d', strtotime('-1 day', time()));
+    $basis_export_end_date = date('Y-m-d', strtotime('now', time()));
     $basis_export_format = (!defined('BASIS_EXPORT_FORMAT')) ? 'json' : BASIS_EXPORT_FORMAT;
     $settings = array();
 
@@ -184,9 +188,12 @@ function runInteractive()
     echo "Enter Basis password [$basis_password_mask]: ";
     $input_password = trim(fgets($handle));
     $settings['basis_password'] = (empty($input_password) ? $basis_password : $input_password);
-    echo "Enter data export date (YYYY-MM-DD) [$basis_export_date] : ";
-    $input_export_date = trim(fgets($handle));
-    $settings['basis_export_date'] = (empty($input_export_date) ? $basis_export_date : $input_export_date);
+    echo "Enter data export start date (YYYY-MM-DD) [$basis_export_start_date] : ";
+    $input_export_start_date = trim(fgets($handle));
+    $settings['basis_export_start_date'] = (empty($input_export_start_date) ? $basis_export_start_date : $input_export_start_date);
+    echo "Enter data export end date (YYYY-MM-DD) [$basis_export_end_date] : ";
+    $input_export_end_date = trim(fgets($handle));
+    $settings['basis_export_end_date'] = (empty($input_export_end_date) ? $basis_export_end_date : $input_export_end_date);    
     echo "Enter export format (json|csv|html) [$basis_export_format] : ";
     $input_export_format = trim(fgets($handle));
     $settings['basis_export_format'] = (empty($input_export_format) ? $basis_export_format : $input_export_format);
@@ -198,7 +205,8 @@ function runInteractive()
         echo "-----------------------------\n";
         echo 'Username: ' . $settings['basis_username'] . "\n";
         echo 'Password: ' . $settings['basis_password'] . "\n";
-        echo 'Date: ' . $settings['basis_export_date'] . "\n";
+        echo 'Start Date: ' . $settings['basis_export_start_date'] . "\n";
+        echo 'End Date: ' . $settings['basis_export_end_date'] . "\n";
         echo 'Format: ' . $settings['basis_export_format'] . "\n";
         echo "-----------------------------\n";
     }

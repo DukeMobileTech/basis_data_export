@@ -111,18 +111,39 @@ class BasisExport
     * @return bool
     * @throws Exception
     */
-    function getMetrics($export_date = '', $export_format = 'json')
+    function getMetrics($export_start_date = '', $export_end_date = '', $export_format = 'json')
     {
-        // Check for YYYY-MM-DD date format, else throw error
-        if (!isset($export_date)) {
+        // Check for YYYY-MM-DD start date format, else throw error
+        if (!isset($export_start_date)) {
             // default to yesterday
-            $export_date = date('Y-m-d', strtotime('-1 day', time()));
+            $export_start_date = date('Y-m-d', strtotime('-1 day', time()));
         } else {
-            $export_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_date);
+            $export_start_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_start_date);
         }
-        if (!$this->isValidDate($export_date)) {
-            throw new Exception('ERROR: Invalid date -  ' . $export_date . "\n");
+        if (!$this->isValidDate($export_start_date)) {
+            throw new Exception('ERROR: Invalid date -  ' . $export_start_date . "\n");
             return false;
+        }
+        
+        // Check for YYYY-MM-DD end date format, else throw error
+        if (!isset($export_end_date)) {
+            // default to today
+            $export_end_date = date('Y-m-d', strtotime('now', time()));
+        } else {
+            $export_end_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_end_date);
+        }
+        if (!$this->isValidDate($export_end_date)) {
+            throw new Exception('ERROR: Invalid date -  ' . $export_end_date . "\n");
+            return false;
+        }
+        
+        //get end of day of end_date
+        if($export_end_date == date('Y-m-d', strtotime('now', time()))) {
+            $export_end_date_mod = strtotime('now', time());
+        } else {
+            $end_date = new DateTime($export_end_date);
+            $end_date = $end_date->modify('+1 day');
+            $export_end_date_mod = strtotime($end_date->format('Y-m-d')) - 1;
         }
 
         // Make sure export format is valid
@@ -141,9 +162,10 @@ class BasisExport
             }
         }
 
-        // Request data from Basis for selected date. Note we're requesting all available data.
-        $metrics_url = 'https://app.mybasis.com/api/v1/metricsday/me?'
-                . 'day=' . $export_date
+            // Request data from Basis for selected dates. Note we're requesting all available data.
+            $metrics_url = 'https://app.mybasis.com/api/v1/metrics/me?'
+                . 'start=' .strtotime($export_start_date)
+                .'&end=' .$export_end_date_mod
                 . '&padding=' . $this->export_offset
                 . '&heartrate=true'
                 . '&steps=true'
@@ -188,9 +210,9 @@ class BasisExport
                 return false;
             }
 
-        } else if ($export_format == 'csv') {
+        } else if ($export_format == 'csv') {   
             // Save results as .csv file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-metrics.csv';
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-metrics.csv';
 
             $fp = fopen($file, 'w');
             if(!$fp) {
@@ -219,23 +241,35 @@ class BasisExport
     }
 
    /**
-    * Retreive user's sleep data for given date and save to file
+    * Retrieve user's sleep data for given date and save to file
     * @param string $export_date Date in YYYY-MM-DD format
     * @param string $export_format Export type (json,csv,html)
     * @return bool
     * @throws Exception
     */
-    function getSleep($export_date = '', $export_format = 'json')
+    function getSleep($export_start_date = '', $export_end_date = '', $export_format = 'json')
     {
-        // Check for YYYY-MM-DD date format, else throw error
-        if (!isset($export_date)) {
+        // Check for YYYY-MM-DD start date format, else throw error
+        if (!isset($export_start_date)) {
             // default to yesterday
-            $export_date = date('Y-m-d', strtotime('-1 day', time()));
+            $export_start_date = date('Y-m-d', strtotime('-1 day', time()));
         } else {
-            $export_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_date);
+            $export_start_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_start_date);
         }
-        if (!$this->isValidDate($export_date)) {
-            throw new Exception('ERROR: Invalid date -  ' . $export_date . "\n");
+        if (!$this->isValidDate($export_start_date)) {
+            throw new Exception('ERROR: Invalid date -  ' . $export_start_date . "\n");
+            return false;
+        }
+        
+        // Check for YYYY-MM-DD end date format, else throw error
+        if (!isset($export_end_date)) {
+            // default to today
+            $export_end_date = date('Y-m-d', strtotime('now', time()));
+        } else {
+            $export_end_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_end_date);
+        }
+        if (!$this->isValidDate($export_end_date)) {
+            throw new Exception('ERROR: Invalid date -  ' . $export_end_date . "\n");
             return false;
         }
 
@@ -244,7 +278,7 @@ class BasisExport
             throw new Exception('ERROR: Invalid export format -  ' . $export_format . "\n");
             return false;
         }
-
+        
         // Log into Basis account to authorize access.
         if (empty($this->access_token)) {
             try {
@@ -254,80 +288,10 @@ class BasisExport
                 return false;
             }
         }
-
-        // Request sleep data from Basis for selected date. Note we're requesting all available data.
-        $sleep_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
-                . 'type=sleep'
-                . '&expand=activities.stages,activities.events';
-
-        // Initialize the cURL resource and make api request
-        $ch = curl_init();
-        curl_setopt_array($ch, array(
-            CURLOPT_URL => $sleep_url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_COOKIEFILE => $this->cookie_jar
-        ));
-        $result = curl_exec($ch);
-        $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
-
-        if ($response_code == '401') {
-            throw new Exception("ERROR: Unauthorized!\n");
-            return false;
-        }
-
-        curl_close($ch);
-
-        // Parse data from JSON response
-        $json = json_decode($result, true);
-
-        // Create an array of sleep activities. Basis breaks up sleep into individual
-        // events if there is an interruption longer than 15 minutes.
-        $sleep = array();
-        $sleep_activities = $json['content']['activities'];
-        foreach ($sleep_activities as $sleep_activity) {
-            // Add sleep event to array
-            $sleep[] = array(
-                'start_time'            => isset($sleep_activity['start_time']['timestamp']) ? $sleep_activity['start_time']['timestamp'] : '',
-                'start_time_iso'        => isset($sleep_activity['start_time']['iso']) ? $sleep_activity['start_time']['iso'] : '',
-                'start_time_timezone'   => isset($sleep_activity['start_time']['time_zone']['name']) ? $sleep_activity['start_time']['time_zone']['name'] : '',
-                'start_time_offset'     => isset($sleep_activity['start_time']['time_zone']['offset']) ? $sleep_activity['start_time']['time_zone']['offset'] : '',
-                'end_time'              => isset($sleep_activity['end_time']['timestamp']) ? $sleep_activity['end_time']['timestamp'] : '',
-                'end_time_iso'          => isset($sleep_activity['end_time']['iso']) ? $sleep_activity['end_time']['iso'] : '',
-                'end_time_timezone'     => isset($sleep_activity['end_time']['time_zone']['name']) ? $sleep_activity['end_time']['time_zone']['name'] : '',
-                'end_time_offset'       => isset($sleep_activity['end_time']['time_zone']['offset']) ? $sleep_activity['end_time']['time_zone']['offset'] : '',
-                'heart_rate_avg'        => isset($sleep_activity['heart_rate']['avg']) ? $sleep_activity['heart_rate']['avg'] : '',
-                'heart_rate_min'        => isset($sleep_activity['heart_rate']['min']) ? $sleep_activity['heart_rate']['min'] : '',
-                'heart_rate_max'        => isset($sleep_activity['heart_rate']['max']) ? $sleep_activity['heart_rate']['max'] : '',
-                'actual_seconds'        => isset($sleep_activity['actual_seconds']) ? $sleep_activity['actual_seconds'] : '',
-                'calories'              => isset($sleep_activity['calories']) ? $sleep_activity['calories'] : '',
-                'light_minutes'         => isset($sleep_activity['sleep']['light_minutes']) ? $sleep_activity['sleep']['light_minutes'] : '',
-                'deep_minutes'          => isset($sleep_activity['sleep']['deep_minutes']) ? $sleep_activity['sleep']['deep_minutes'] : '',
-                'rem_minutes'           => isset($sleep_activity['sleep']['rem_minutes']) ? $sleep_activity['sleep']['rem_minutes'] : '',
-                'interruption_minutes'  => isset($sleep_activity['sleep']['interruption_minutes']) ? $sleep_activity['sleep']['interruption_minutes'] : '',
-                'unknown_minutes'       => isset($sleep_activity['sleep']['unknown_minutes']) ? $sleep_activity['sleep']['unknown_minutes'] : '',
-                'interruptions'         => isset($sleep_activity['sleep']['interruptions']) ? $sleep_activity['sleep']['interruptions'] : '',
-                'toss_and_turn'         => isset($sleep_activity['sleep']['toss_and_turn']) ? $sleep_activity['sleep']['toss_and_turn'] : '',
-                'events'                => isset($sleep_activity['events']) ? $sleep_activity['events'] : '',
-                'type'                  => isset($sleep_activity['type']) ? $sleep_activity['type'] : '',
-                'state'                 => isset($sleep_activity['state']) ? $sleep_activity['state'] : '',
-                'version'               => isset($sleep_activity['version']) ? $sleep_activity['version'] : '',
-                'id'                    => isset($sleep_activity['id']) ? $sleep_activity['id'] : ''
-            );
-        }
-
-        if ($export_format == 'html') {
-            // Save results as .html file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-sleep.html';
-            $html = $this->sleepToHTML($json);
-            if (!file_put_contents($file, $html)) {
-               throw new Exception("ERROR: Could not save data to file $file!");
-               return false;
-            }
-
-        } else if ($export_format == 'csv') {
+     
+        if ($export_format == 'csv') {
             // Save results as .csv file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-sleep.csv';
-
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' .$export_end_date . '-sleep.csv';
             $fp = fopen($file, 'w');
             if(!$fp) {
                 throw new Exception("ERROR: Could not save data to file $file!");
@@ -341,61 +305,152 @@ class BasisExport
                 'heart rate max', 'state', 'version', 'id'
                 )
             );
-
-            for ($i=0; $i<count($sleep); $i++) {
-                // HH:MM:SS timestamp
-                $start_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['start_time']);
-                $end_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['end_time']);
-                $row = array(
-                    $start_time, $sleep[$i]['start_time_iso'], $sleep[$i]['start_time_timezone'], 
-                    $sleep[$i]['start_time_offset'], $end_time, $sleep[$i]['end_time_iso'], 
-                    $sleep[$i]['end_time_timezone'], $sleep[$i]['end_time_offset'],
-                    $sleep[$i]['light_minutes'], $sleep[$i]['deep_minutes'], $sleep[$i]['rem_minutes'], 
-                    $sleep[$i]['interruption_minutes'], $sleep[$i]['unknown_minutes'],
-                    $sleep[$i]['interruptions'], $sleep[$i]['toss_and_turn'], $sleep[$i]['type'], 
-                    $sleep[$i]['actual_seconds'], $sleep[$i]['calories'], $sleep[$i]['heart_rate_avg'], 
-                    $sleep[$i]['heart_rate_min'], $sleep[$i]['heart_rate_max'], 
-                    $sleep[$i]['state'], $sleep[$i]['version'], $sleep[$i]['id']
-                    
-                );
-
-                // Add row to csv file
-                fputcsv($fp, $row);
-            }
             fclose($fp);
-
-        }   else {
+        } else if ($export_format == 'html') {
+                // Save results as .html file
+                $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-sleep.html';
+        } else {
             // Save results as .json file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-sleep.json';
-            if (!file_put_contents($file, $result)) {
-                throw new Exception("ERROR: Could not save data to file $file!");
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-sleep.json';
+        }
+        
+        $dates_range = $this->getDatesInRange($export_start_date, $export_end_date);
+        foreach ($dates_range as $export_date) {
+            // Request sleep data from Basis for selected date. Note we're requesting all available data.
+            $sleep_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
+                . 'type=sleep'
+                . '&expand=activities.stages,activities.events';
+            
+            // Initialize the cURL resource and make api request
+            $ch = curl_init();
+            curl_setopt_array($ch, array(
+                CURLOPT_URL => $sleep_url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_COOKIEFILE => $this->cookie_jar
+            ));
+            $result = curl_exec($ch);
+            $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
+    
+            if ($response_code == '401') {
+                throw new Exception("ERROR: Unauthorized!\n");
                 return false;
             }
+    
+            curl_close($ch);
+            
+            // Parse data from JSON response
+            $json = json_decode($result, true);
+    
+            // Create an array of sleep activities. Basis breaks up sleep into individual
+            // events if there is an interruption longer than 15 minutes.
+            $sleep = array();
+            $sleep_activities = $json['content']['activities'];
+            foreach ($sleep_activities as $sleep_activity) {
+                // Add sleep event to array
+                $sleep[] = array(
+                    'start_time'            => isset($sleep_activity['start_time']['timestamp']) ? $sleep_activity['start_time']['timestamp'] : '',
+                    'start_time_iso'        => isset($sleep_activity['start_time']['iso']) ? $sleep_activity['start_time']['iso'] : '',
+                    'start_time_timezone'   => isset($sleep_activity['start_time']['time_zone']['name']) ? $sleep_activity['start_time']['time_zone']['name'] : '',
+                    'start_time_offset'     => isset($sleep_activity['start_time']['time_zone']['offset']) ? $sleep_activity['start_time']['time_zone']['offset'] : '',
+                    'end_time'              => isset($sleep_activity['end_time']['timestamp']) ? $sleep_activity['end_time']['timestamp'] : '',
+                    'end_time_iso'          => isset($sleep_activity['end_time']['iso']) ? $sleep_activity['end_time']['iso'] : '',
+                    'end_time_timezone'     => isset($sleep_activity['end_time']['time_zone']['name']) ? $sleep_activity['end_time']['time_zone']['name'] : '',
+                    'end_time_offset'       => isset($sleep_activity['end_time']['time_zone']['offset']) ? $sleep_activity['end_time']['time_zone']['offset'] : '',
+                    'heart_rate_avg'        => isset($sleep_activity['heart_rate']['avg']) ? $sleep_activity['heart_rate']['avg'] : '',
+                    'heart_rate_min'        => isset($sleep_activity['heart_rate']['min']) ? $sleep_activity['heart_rate']['min'] : '',
+                    'heart_rate_max'        => isset($sleep_activity['heart_rate']['max']) ? $sleep_activity['heart_rate']['max'] : '',
+                    'actual_seconds'        => isset($sleep_activity['actual_seconds']) ? $sleep_activity['actual_seconds'] : '',
+                    'calories'              => isset($sleep_activity['calories']) ? $sleep_activity['calories'] : '',
+                    'light_minutes'         => isset($sleep_activity['sleep']['light_minutes']) ? $sleep_activity['sleep']['light_minutes'] : '',
+                    'deep_minutes'          => isset($sleep_activity['sleep']['deep_minutes']) ? $sleep_activity['sleep']['deep_minutes'] : '',
+                    'rem_minutes'           => isset($sleep_activity['sleep']['rem_minutes']) ? $sleep_activity['sleep']['rem_minutes'] : '',
+                    'interruption_minutes'  => isset($sleep_activity['sleep']['interruption_minutes']) ? $sleep_activity['sleep']['interruption_minutes'] : '',
+                    'unknown_minutes'       => isset($sleep_activity['sleep']['unknown_minutes']) ? $sleep_activity['sleep']['unknown_minutes'] : '',
+                    'interruptions'         => isset($sleep_activity['sleep']['interruptions']) ? $sleep_activity['sleep']['interruptions'] : '',
+                    'toss_and_turn'         => isset($sleep_activity['sleep']['toss_and_turn']) ? $sleep_activity['sleep']['toss_and_turn'] : '',
+                    'events'                => isset($sleep_activity['events']) ? $sleep_activity['events'] : '',
+                    'type'                  => isset($sleep_activity['type']) ? $sleep_activity['type'] : '',
+                    'state'                 => isset($sleep_activity['state']) ? $sleep_activity['state'] : '',
+                    'version'               => isset($sleep_activity['version']) ? $sleep_activity['version'] : '',
+                    'id'                    => isset($sleep_activity['id']) ? $sleep_activity['id'] : ''
+                );
+            }
+
+            if ($export_format == 'html') {
+                $html = $this->sleepToHTML($json);
+                if (!file_put_contents($file, $html)) {
+                   throw new Exception("ERROR: Could not save data to file $file!");
+                   return false;
+                }
+            } else if ($export_format == 'csv') {
+                $fp = fopen($file, 'a'); //Open file for appending
+                if(!$fp) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+                for ($i=0; $i<count($sleep); $i++) {
+                    // HH:MM:SS timestamp
+                    $start_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['start_time']);
+                    $end_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['end_time']);
+                    $row = array(
+                        $start_time, $sleep[$i]['start_time_iso'], $sleep[$i]['start_time_timezone'], 
+                        $sleep[$i]['start_time_offset'], $end_time, $sleep[$i]['end_time_iso'], 
+                        $sleep[$i]['end_time_timezone'], $sleep[$i]['end_time_offset'],
+                        $sleep[$i]['light_minutes'], $sleep[$i]['deep_minutes'], $sleep[$i]['rem_minutes'], 
+                        $sleep[$i]['interruption_minutes'], $sleep[$i]['unknown_minutes'],
+                        $sleep[$i]['interruptions'], $sleep[$i]['toss_and_turn'], $sleep[$i]['type'], 
+                        $sleep[$i]['actual_seconds'], $sleep[$i]['calories'], $sleep[$i]['heart_rate_avg'], 
+                        $sleep[$i]['heart_rate_min'], $sleep[$i]['heart_rate_max'], 
+                        $sleep[$i]['state'], $sleep[$i]['version'], $sleep[$i]['id']                    
+                    );
+                    // Add row to csv file
+                    fputcsv($fp, $row);
+                }
+                fclose($fp);
+            }   else {
+                if (!file_put_contents($file, $result)) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+            }        
         }
+
     }
 
 
    /**
-    * Retreive user's activity data for given date and save to file
+    * Retrieve user's activity data for given date and save to file
     * @param string $export_date Date in YYYY-MM-DD format
     * @param string $export_format Export type (json,csv,html)
     * @return bool
     * @throws Exception
     */
-    function getActivities($export_date = '', $export_format = 'json')
+    function getActivities($export_start_date = '', $export_end_date = '', $export_format = 'json')
     {
-        // Check for YYYY-MM-DD date format, else throw error
-        if (!isset($export_date)) {
+        // Check for YYYY-MM-DD start date format, else throw error
+        if (!isset($export_start_date)) {
             // default to yesterday
-            $export_date = date('Y-m-d', strtotime('-1 day', time()));
+            $export_start_date = date('Y-m-d', strtotime('-1 day', time()));
         } else {
-            $export_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_date);
+            $export_start_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_start_date);
         }
-        if (!$this->isValidDate($export_date)) {
-            throw new Exception('ERROR: Invalid date -  ' . $export_date . "\n");
+        if (!$this->isValidDate($export_start_date)) {
+            throw new Exception('ERROR: Invalid date -  ' . $export_start_date . "\n");
             return false;
         }
 
+        // Check for YYYY-MM-DD end date format, else throw error
+        if (!isset($export_end_date)) {
+            // default to today
+            $export_end_date = date('Y-m-d', strtotime('now', time()));
+        } else {
+            $export_end_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_end_date);
+        }
+        if (!$this->isValidDate($export_end_date)) {
+            throw new Exception('ERROR: Invalid date -  ' . $export_end_date . "\n");
+            return false;
+        }
+        
         // Make sure export format is valid
         if (!in_array($export_format, $this->export_formats)) {
             throw new Exception('ERROR: Invalid export format -  ' . $export_format . "\n");
@@ -412,72 +467,9 @@ class BasisExport
             }
         }
 
-        // Request activities data from Basis for selected date. Note we're requesting all available data.
-        $activities_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
-                . 'type=run,walk,bike'
-                . '&expand=activities';
-
-        // Initialize the cURL resource and make api request
-        $ch = curl_init();
-        curl_setopt_array($ch, array(
-            CURLOPT_URL => $activities_url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_COOKIEFILE => $this->cookie_jar
-        ));
-        $result = curl_exec($ch);
-        $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
-
-        if ($response_code == '401') {
-            throw new Exception("ERROR: Unauthorized!\n");
-            return false;
-        }
-
-        curl_close($ch);
-
-        // Parse data from JSON response
-        $json = json_decode($result, true);
-
-        // Create an array of activities.
-        $activities = array();
-        $activity_items = $json['content']['activities'];
-        foreach ($activity_items as $activity_item) {
-            // Add activity to array
-            $activities[] = array(
-                'start_time'            => isset($activity_item['start_time']['timestamp']) ? $activity_item['start_time']['timestamp'] : '',
-                'start_time_iso'        => isset($activity_item['start_time']['iso']) ? $activity_item['start_time']['iso'] : '',
-                'start_time_timezone'   => isset($activity_item['start_time']['time_zone']['name']) ? $activity_item['start_time']['time_zone']['name'] : '',
-                'start_time_offset'     => isset($activity_item['start_time']['time_zone']['offset']) ? $activity_item['start_time']['time_zone']['offset'] : '',
-                'end_time'              => isset($activity_item['end_time']['timestamp']) ? $activity_item['end_time']['timestamp'] : '',
-                'end_time_iso'          => isset($activity_item['end_time']['iso']) ? $activity_item['end_time']['iso'] : '',
-                'end_time_timezone'     => isset($activity_item['end_time']['time_zone']['name']) ? $activity_item['end_time']['time_zone']['name'] : '',
-                'end_time_offset'       => isset($activity_item['end_time']['time_zone']['offset']) ? $activity_item['end_time']['time_zone']['offset'] : '',
-                'heart_rate_avg'        => isset($activity_item['heart_rate']['avg']) ? $activity_item['heart_rate']['avg'] : '',
-                'heart_rate_min'        => isset($activity_item['heart_rate']['min']) ? $activity_item['heart_rate']['min'] : '',
-                'heart_rate_max'        => isset($activity_item['heart_rate']['max']) ? $activity_item['heart_rate']['max'] : '',
-                'actual_seconds'        => isset($activity_item['actual_seconds']) ? $activity_item['actual_seconds'] : '',
-                'calories'              => isset($activity_item['calories']) ? $activity_item['calories'] : '',
-                'steps'                 => isset($activity_item['steps']) ? $activity_item['steps'] : '',
-                'minutes'               => isset($activity_item['minutes']) ? $activity_item['minutes'] : '',
-                'type'                  => isset($activity_item['type']) ? $activity_item['type'] : '',
-                'state'                 => isset($activity_item['state']) ? $activity_item['state'] : '',
-                'version'               => isset($activity_item['version']) ? $activity_item['version'] : '',
-                'id'                    => isset($activity_item['id']) ? $activity_item['id'] : ''
-            );
-        }
-
-        if ($export_format == 'html') {
-            // Save results as .html file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-activities.html';
-            $html = $this->activitiesToHTML($json);
-            if (!file_put_contents($file, $html)) {
-                throw new Exception("ERROR: Could not save data to file $file!");
-                return false;
-            }
-
-        } else if ($export_format == 'csv') {
+        if ($export_format == 'csv') {
             // Save results as .csv file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-activities.csv';
-
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-activities.csv';
             $fp = fopen($file, 'w');
             if(!$fp) {
                 throw new Exception("ERROR: Could not save data to file $file!");
@@ -490,33 +482,106 @@ class BasisExport
                 'state', 'version', 'id'
                 )
             );
-            for ($i=0; $i<count($activities); $i++) {
-                // HH:MM:SS timestamp
-                $start_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['start_time']);
-                $end_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['end_time']);
-                $row = array(
-                    $start_time, $activities[$i]['start_time_iso'], $activities[$i]['start_time_timezone'], 
-                    $activities[$i]['start_time_offset'], $end_time, $activities[$i]['end_time_iso'], 
-                    $activities[$i]['end_time_timezone'], $activities[$i]['end_time_offset'],
-                    $activities[$i]['type'], $activities[$i]['actual_seconds'], $activities[$i]['steps'],
-                    $activities[$i]['calories'], $activities[$i]['minutes'], $activities[$i]['heart_rate_avg'], 
-                    $activities[$i]['heart_rate_min'], $activities[$i]['heart_rate_max'], $activities[$i]['state'],
-                    $activities[$i]['version'], $activities[$i]['id']
-                );
-
-                // Add row to csv file
-                fputcsv($fp, $row);
-            }
-            fclose($fp);
-
-        }   else {
+        } else if ($export_format == 'html') {
+             // Save results as .html file
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-activities.html';
+        } else {
             // Save results as .json file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-activities.json';
-            if (!file_put_contents($file, $result)) {
-                throw new Exception("ERROR: Could not save data to file $file!");
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-activities.json'; 
+        }
+          
+        $dates_range = $this->getDatesInRange($export_start_date, $export_end_date);
+        foreach ($dates_range as $export_date) {
+            // Request activities data from Basis for selected date. Note we're requesting all available data.
+            $activities_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
+                . 'type=run,walk,bike'
+                . '&expand=activities';
+
+            // Initialize the cURL resource and make api request
+            $ch = curl_init();
+            curl_setopt_array($ch, array(
+                CURLOPT_URL => $activities_url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_COOKIEFILE => $this->cookie_jar
+            ));
+            $result = curl_exec($ch);
+            $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
+
+            if ($response_code == '401') {
+                throw new Exception("ERROR: Unauthorized!\n");
                 return false;
             }
+
+            curl_close($ch);
+
+            // Parse data from JSON response
+            $json = json_decode($result, true);
+
+            // Create an array of activities.
+            $activities = array();
+            $activity_items = $json['content']['activities'];
+            foreach ($activity_items as $activity_item) {
+                // Add activity to array
+                $activities[] = array(
+                    'start_time'            => isset($activity_item['start_time']['timestamp']) ? $activity_item['start_time']['timestamp'] : '',
+                    'start_time_iso'        => isset($activity_item['start_time']['iso']) ? $activity_item['start_time']['iso'] : '',
+                    'start_time_timezone'   => isset($activity_item['start_time']['time_zone']['name']) ? $activity_item['start_time']['time_zone']['name'] : '',
+                    'start_time_offset'     => isset($activity_item['start_time']['time_zone']['offset']) ? $activity_item['start_time']['time_zone']['offset'] : '',
+                    'end_time'              => isset($activity_item['end_time']['timestamp']) ? $activity_item['end_time']['timestamp'] : '',
+                    'end_time_iso'          => isset($activity_item['end_time']['iso']) ? $activity_item['end_time']['iso'] : '',
+                    'end_time_timezone'     => isset($activity_item['end_time']['time_zone']['name']) ? $activity_item['end_time']['time_zone']['name'] : '',
+                    'end_time_offset'       => isset($activity_item['end_time']['time_zone']['offset']) ? $activity_item['end_time']['time_zone']['offset'] : '',
+                    'heart_rate_avg'        => isset($activity_item['heart_rate']['avg']) ? $activity_item['heart_rate']['avg'] : '',
+                    'heart_rate_min'        => isset($activity_item['heart_rate']['min']) ? $activity_item['heart_rate']['min'] : '',
+                    'heart_rate_max'        => isset($activity_item['heart_rate']['max']) ? $activity_item['heart_rate']['max'] : '',
+                    'actual_seconds'        => isset($activity_item['actual_seconds']) ? $activity_item['actual_seconds'] : '',
+                    'calories'              => isset($activity_item['calories']) ? $activity_item['calories'] : '',
+                    'steps'                 => isset($activity_item['steps']) ? $activity_item['steps'] : '',
+                    'minutes'               => isset($activity_item['minutes']) ? $activity_item['minutes'] : '',
+                    'type'                  => isset($activity_item['type']) ? $activity_item['type'] : '',
+                    'state'                 => isset($activity_item['state']) ? $activity_item['state'] : '',
+                    'version'               => isset($activity_item['version']) ? $activity_item['version'] : '',
+                    'id'                    => isset($activity_item['id']) ? $activity_item['id'] : ''
+                );
+            }
+
+            if ($export_format == 'html') {
+                $html = $this->activitiesToHTML($json);
+                if (!file_put_contents($file, $html)) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+            } else if ($export_format == 'csv') {
+                $fp = fopen($file, 'a'); 
+                if(!$fp) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+                for ($i=0; $i<count($activities); $i++) {
+                    // HH:MM:SS timestamp
+                    $start_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['start_time']);
+                    $end_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['end_time']);
+                    $row = array(
+                        $start_time, $activities[$i]['start_time_iso'], $activities[$i]['start_time_timezone'], 
+                        $activities[$i]['start_time_offset'], $end_time, $activities[$i]['end_time_iso'], 
+                        $activities[$i]['end_time_timezone'], $activities[$i]['end_time_offset'],
+                        $activities[$i]['type'], $activities[$i]['actual_seconds'], $activities[$i]['steps'],
+                        $activities[$i]['calories'], $activities[$i]['minutes'], $activities[$i]['heart_rate_avg'], 
+                        $activities[$i]['heart_rate_min'], $activities[$i]['heart_rate_max'], $activities[$i]['state'],
+                        $activities[$i]['version'], $activities[$i]['id']
+                    );    
+                    // Add row to csv file
+                    fputcsv($fp, $row);
+                }
+                fclose($fp);
+            } else {
+                if (!file_put_contents($file, $result)) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+            }
         }
+
     }
 
     /**
@@ -841,6 +906,25 @@ HTML;
 
     } // end activitiesToHTML
 
+    //Get days between two dates - inclusive
+    function getDatesInRange($start_date, $end_date) 
+    {
+        $start = new DateTime($start_date);
+        $end = new DateTime($end_date);
+        $interval = new DateInterval('P1D');
+        $period = new DatePeriod($start, $interval, $end);
+        $days = array();
+        foreach ($period as $day) {
+            array_push($days, $day -> format('Y-m-d'));
+        }
+        if ($start != $end) {
+            array_push($days, $end -> format('Y-m-d'));
+        } else {
+            array_push($days, $start -> format('Y-m-d'));
+        }
+        return $days;
+    }
 
-} // end class BasisExport
+}
+ // end class BasisExport
 ?>
