@@ -61,7 +61,6 @@ define('DEBUG', false);
 
 // See if we are running in command-line mode
 if (php_sapi_name() == "cli") {
-
     // Check for command-line arguments, otherwise enter interactive mode.
     if($argc > 1) {
         $settings = runCommandLine();
@@ -69,15 +68,13 @@ if (php_sapi_name() == "cli") {
         // Enter interactive mode
         $settings = runInteractive();
     }
-
 } else {
-
     // Request has been make via web browser
     $settings = runHttp();
 }
 
 // Create instance of BasisExport class
-$basis = new BasisExport($settings['basis_username'], $settings['basis_password']);
+$basis = new BasisExport();
 $basis->debug = DEBUG;
 
 // Query Basis API for biometric data
@@ -167,12 +164,6 @@ function runCommandLine()
 **/
 function runInteractive()
 {
-    $basis_username = (!defined('BASIS_USERNAME')) ? '' : BASIS_USERNAME;
-    $basis_password = (!defined('BASIS_PASSWORD')) ? '' : BASIS_PASSWORD;
-    $basis_password_mask = (!defined('BASIS_PASSWORD')) ? '' : '********';
-
-//    $basis_password_mask = (!)
-
     $basis_export_start_date = date('Y-m-d', strtotime('-1 day', time()));
     $basis_export_end_date = date('Y-m-d', strtotime('now', time()));
     $basis_export_format = (!defined('BASIS_EXPORT_FORMAT')) ? 'json' : BASIS_EXPORT_FORMAT;
@@ -182,12 +173,6 @@ function runInteractive()
     echo "Basis data export script.\n";
     echo "-------------------------\n";
     $handle = fopen ("php://stdin","r");
-    echo "Enter Basis username [$basis_username]: ";
-    $input_username = trim(fgets($handle));
-    $settings['basis_username'] = (empty($input_username) ? $basis_username : $input_username);
-    echo "Enter Basis password [$basis_password_mask]: ";
-    $input_password = trim(fgets($handle));
-    $settings['basis_password'] = (empty($input_password) ? $basis_password : $input_password);
     echo "Enter data export start date (YYYY-MM-DD) [$basis_export_start_date] : ";
     $input_export_start_date = trim(fgets($handle));
     $settings['basis_export_start_date'] = (empty($input_export_start_date) ? $basis_export_start_date : $input_export_start_date);

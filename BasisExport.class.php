@@ -13,10 +13,6 @@
 
 class BasisExport
 {
-    // Basis login details
-    private $username;
-    private $password;
-
     // Enable/disable debugging
     public $debug = false;
 
@@ -35,12 +31,9 @@ class BasisExport
 
     // Used for cURL cookie storage (needed for api access)
     private $cookie_jar;
-
-    public function __construct($username, $password)
+    
+    public function __construct()
     {
-        $this->username = $username;
-        $this->password = $password;
-
         // Location to store cURL's CURLOPT_COOKIEJAR (for access_token cookie)
         $this->cookie_jar = dirname(__FILE__) . '/cookie.txt';
     }
@@ -50,11 +43,11 @@ class BasisExport
     * @return bool
     * @throws Exception
     */
-    function doLogin()
+    function doLogin($username, $password)
     {
         $login_data = array(
-            'username' => $this->username,
-            'password' => $this->password,
+            'username' => $username,
+            'password' => $password,
         );
 
         // Test configuration
@@ -102,10 +95,10 @@ class BasisExport
             }
         }
 
-    } // doLogin()
+    } 
 
     /**
-    * Retreive user's biometric readings for given date and save to file
+    * Retrieve user's biometric readings for given date and save to file
     * @param string $export_date Date in YYYY-MM-DD format
     * @param string $export_format Export type (json,csv,html)
     * @return bool
@@ -151,17 +144,35 @@ class BasisExport
             throw new Exception('ERROR: Invalid export format -  ' . $export_format . "\n");
             return false;
         }
-
-        // Log into Basis account to authorize access.
-        if (empty($this->access_token)) {
+        
+        if ($export_format == 'html') {
+            // Save results as .html file
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-metrics.html';
+        } else if ($export_format == 'csv') {   
+            // Save results as .csv file
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-metrics.csv';
+            $fp = fopen($file, 'w');
+            if(!$fp) {
+                throw new Exception("ERROR: Could not save data to file $file!");
+                return false;
+            }
+            fputcsv($fp, array('username', 'user_id', 'timestamp', 'heartrate', 'steps', 'calories', 'gsr', 'skintemp', 'airtemp'));
+            fclose($fp);
+        } else {
+            // Save results as .json file
+            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-metrics.json';
+        }
+        
+        $accounts = $this->getAccounts();
+        foreach ($accounts as $user=>$pword) {
+           echo "Get biometrics data for user " . $user . "\n";     
             try {
-                $this->doLogin();
+                $this->doLogin($user, $pword);
             } catch (Exception $e) {
                 echo 'Caught exception: ',  $e->getMessage(), "\n";
                 return false;
             }
-        }
-
+            
             // Request data from Basis for selected dates. Note we're requesting all available data.
             $metrics_url = 'https://app.mybasis.com/api/v1/metrics/me?'
                 . 'start=' .strtotime($export_start_date)
@@ -173,71 +184,63 @@ class BasisExport
                 . '&gsr=true'
                 . '&skin_temp=true'
                 . '&air_temp=true';
+                
+            // Initialize the cURL resource and make api request
+            $ch = curl_init();
+            curl_setopt_array($ch, array(
+                CURLOPT_URL => $metrics_url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_COOKIEFILE => $this->cookie_jar
+            ));
+            $result = curl_exec($ch);
+            $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
 
-        // Initialize the cURL resource and make api request
-        $ch = curl_init();
-        curl_setopt_array($ch, array(
-            CURLOPT_URL => $metrics_url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_COOKIEFILE => $this->cookie_jar
-        ));
-        $result = curl_exec($ch);
-        $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
-
-        if ($response_code == '401') {
-            throw new Exception("ERROR: Unauthorized!\n");
-            return false;
+            if ($response_code == '401') {
+                throw new Exception("ERROR: Unauthorized!\n");
+                return false;
+            }
+    
+            curl_close($ch);  
+            
+            // Parse data from JSON response
+            $json = json_decode($result, true);
+            $report_date = $json['starttime']; // report date, as UNIX timestamp
+            $heartrates = $json['metrics']['heartrate']['values'];
+            $steps = $json['metrics']['steps']['values'];
+            $calories = $json['metrics']['calories']['values'];
+            $gsrs = $json['metrics']['gsr']['values'];
+            $skintemps = $json['metrics']['skin_temp']['values'];
+            $airtemps = $json['metrics']['air_temp']['values'];
+               
+            if ($export_format == 'html') {
+                $html = $this->metricsToHTML($json);
+                if (!file_put_contents($file, $html)) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+            } else if ($export_format == 'csv') {   
+                $fp = fopen($file, 'a');
+                if(!$fp) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+                $study_ids = $this->getStudyIds();
+                for ($i=0; $i<count($heartrates); $i++) {
+                    // HH:MM:SS timestamp
+                    $timestamp = strftime("%Y-%m-%d %H:%M:%S", mktime(0, 0, $i*$this->export_interval, date("n", $report_date), date("j", $report_date), date("Y", $report_date)));                    
+                    $row = array($user, $study_ids[$user], $timestamp, $heartrates[$i], $steps[$i], $calories[$i], $gsrs[$i], $skintemps[$i], $airtemps[$i]);
+                    // Add row to csv file
+                    fputcsv($fp, $row);
+                }
+                fclose($fp);
+            } else {
+                if (!file_put_contents($file, $result)) {
+                    throw new Exception("ERROR: Could not save data to file $file!");
+                    return false;
+                }
+            }            
         }
 
-        curl_close($ch);
-
-        // Parse data from JSON response
-        $json = json_decode($result, true);
-        $report_date = $json['starttime']; // report date, as UNIX timestamp
-        $heartrates = $json['metrics']['heartrate']['values'];
-        $steps = $json['metrics']['steps']['values'];
-        $calories = $json['metrics']['calories']['values'];
-        $gsrs = $json['metrics']['gsr']['values'];
-        $skintemps = $json['metrics']['skin_temp']['values'];
-        $airtemps = $json['metrics']['air_temp']['values'];
-
-        if ($export_format == 'html') {
-            // Save results as .html file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-metrics.html';
-            $html = $this->metricsToHTML($json);
-            if (!file_put_contents($file, $html)) {
-                throw new Exception("ERROR: Could not save data to file $file!");
-                return false;
-            }
-
-        } else if ($export_format == 'csv') {   
-            // Save results as .csv file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-metrics.csv';
-
-            $fp = fopen($file, 'w');
-            if(!$fp) {
-                throw new Exception("ERROR: Could not save data to file $file!");
-                return false;
-            }
-            fputcsv($fp, array('timestamp', 'heartrate', 'steps', 'calories', 'gsr', 'skintemp', 'airtemp'));
-            for ($i=0; $i<count($heartrates); $i++) {
-                // HH:MM:SS timestamp
-                $timestamp = strftime("%Y-%m-%d %H:%M:%S", mktime(0, 0, $i*$this->export_interval, date("n", $report_date), date("j", $report_date), date("Y", $report_date)));
-                $row = array($timestamp, $heartrates[$i], $steps[$i], $calories[$i], $gsrs[$i], $skintemps[$i], $airtemps[$i]);
-
-                // Add row to csv file
-                fputcsv($fp, $row);
-            }
-            fclose($fp);
-
-        }   else {
-            // Save results as .json file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_date . '-metrics.json';
-            if (!file_put_contents($file, $result)) {
-                throw new Exception("ERROR: Could not save data to file $file!");
-                return false;
-            }
-        }
     }
 
    /**
@@ -278,16 +281,6 @@ class BasisExport
             throw new Exception('ERROR: Invalid export format -  ' . $export_format . "\n");
             return false;
         }
-        
-        // Log into Basis account to authorize access.
-        if (empty($this->access_token)) {
-            try {
-                $this->doLogin();
-            } catch (Exception $e) {
-                echo 'Caught exception: ',  $e->getMessage(), "\n";
-                return false;
-            }
-        }
      
         if ($export_format == 'csv') {
             // Save results as .csv file
@@ -298,7 +291,7 @@ class BasisExport
                 return false;
             }
             fputcsv($fp, array(
-                'start time', 'start time ISO', 'start time timezone', 'start time offset',
+                'username', 'user_id', 'start time', 'start time ISO', 'start time timezone', 'start time offset',
                 'end time', 'end time ISO', 'end time timezone', 'end time offset',
                 'light mins', 'deep mins', 'rem mins', 'interruption mins', 'unknown mins', 'interruptions', 
                 'toss turns', 'type', 'actual seconds', 'calories', 'heart rate avg', 'heart rate min', 
@@ -314,107 +307,118 @@ class BasisExport
             $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-sleep.json';
         }
         
-        $dates_range = $this->getDatesInRange($export_start_date, $export_end_date);
-        foreach ($dates_range as $export_date) {
-            // Request sleep data from Basis for selected date. Note we're requesting all available data.
-            $sleep_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
-                . 'type=sleep'
-                . '&expand=activities.stages,activities.events';
-            
-            // Initialize the cURL resource and make api request
-            $ch = curl_init();
-            curl_setopt_array($ch, array(
-                CURLOPT_URL => $sleep_url,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_COOKIEFILE => $this->cookie_jar
-            ));
-            $result = curl_exec($ch);
-            $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
-    
-            if ($response_code == '401') {
-                throw new Exception("ERROR: Unauthorized!\n");
+        $accounts = $this->getAccounts();
+        foreach ($accounts as $user=>$pword) {
+           echo "Get sleep data for user " . $user . "\n";     
+            try {
+                $this->doLogin($user, $pword);
+            } catch (Exception $e) {
+                echo 'Caught exception: ',  $e->getMessage(), "\n";
                 return false;
             }
-    
-            curl_close($ch);
             
-            // Parse data from JSON response
-            $json = json_decode($result, true);
-    
-            // Create an array of sleep activities. Basis breaks up sleep into individual
-            // events if there is an interruption longer than 15 minutes.
-            $sleep = array();
-            $sleep_activities = $json['content']['activities'];
-            foreach ($sleep_activities as $sleep_activity) {
-                // Add sleep event to array
-                $sleep[] = array(
-                    'start_time'            => isset($sleep_activity['start_time']['timestamp']) ? $sleep_activity['start_time']['timestamp'] : '',
-                    'start_time_iso'        => isset($sleep_activity['start_time']['iso']) ? $sleep_activity['start_time']['iso'] : '',
-                    'start_time_timezone'   => isset($sleep_activity['start_time']['time_zone']['name']) ? $sleep_activity['start_time']['time_zone']['name'] : '',
-                    'start_time_offset'     => isset($sleep_activity['start_time']['time_zone']['offset']) ? $sleep_activity['start_time']['time_zone']['offset'] : '',
-                    'end_time'              => isset($sleep_activity['end_time']['timestamp']) ? $sleep_activity['end_time']['timestamp'] : '',
-                    'end_time_iso'          => isset($sleep_activity['end_time']['iso']) ? $sleep_activity['end_time']['iso'] : '',
-                    'end_time_timezone'     => isset($sleep_activity['end_time']['time_zone']['name']) ? $sleep_activity['end_time']['time_zone']['name'] : '',
-                    'end_time_offset'       => isset($sleep_activity['end_time']['time_zone']['offset']) ? $sleep_activity['end_time']['time_zone']['offset'] : '',
-                    'heart_rate_avg'        => isset($sleep_activity['heart_rate']['avg']) ? $sleep_activity['heart_rate']['avg'] : '',
-                    'heart_rate_min'        => isset($sleep_activity['heart_rate']['min']) ? $sleep_activity['heart_rate']['min'] : '',
-                    'heart_rate_max'        => isset($sleep_activity['heart_rate']['max']) ? $sleep_activity['heart_rate']['max'] : '',
-                    'actual_seconds'        => isset($sleep_activity['actual_seconds']) ? $sleep_activity['actual_seconds'] : '',
-                    'calories'              => isset($sleep_activity['calories']) ? $sleep_activity['calories'] : '',
-                    'light_minutes'         => isset($sleep_activity['sleep']['light_minutes']) ? $sleep_activity['sleep']['light_minutes'] : '',
-                    'deep_minutes'          => isset($sleep_activity['sleep']['deep_minutes']) ? $sleep_activity['sleep']['deep_minutes'] : '',
-                    'rem_minutes'           => isset($sleep_activity['sleep']['rem_minutes']) ? $sleep_activity['sleep']['rem_minutes'] : '',
-                    'interruption_minutes'  => isset($sleep_activity['sleep']['interruption_minutes']) ? $sleep_activity['sleep']['interruption_minutes'] : '',
-                    'unknown_minutes'       => isset($sleep_activity['sleep']['unknown_minutes']) ? $sleep_activity['sleep']['unknown_minutes'] : '',
-                    'interruptions'         => isset($sleep_activity['sleep']['interruptions']) ? $sleep_activity['sleep']['interruptions'] : '',
-                    'toss_and_turn'         => isset($sleep_activity['sleep']['toss_and_turn']) ? $sleep_activity['sleep']['toss_and_turn'] : '',
-                    'events'                => isset($sleep_activity['events']) ? $sleep_activity['events'] : '',
-                    'type'                  => isset($sleep_activity['type']) ? $sleep_activity['type'] : '',
-                    'state'                 => isset($sleep_activity['state']) ? $sleep_activity['state'] : '',
-                    'version'               => isset($sleep_activity['version']) ? $sleep_activity['version'] : '',
-                    'id'                    => isset($sleep_activity['id']) ? $sleep_activity['id'] : ''
-                );
-            }
-
-            if ($export_format == 'html') {
-                $html = $this->sleepToHTML($json);
-                if (!file_put_contents($file, $html)) {
-                   throw new Exception("ERROR: Could not save data to file $file!");
-                   return false;
-                }
-            } else if ($export_format == 'csv') {
-                $fp = fopen($file, 'a'); //Open file for appending
-                if(!$fp) {
-                    throw new Exception("ERROR: Could not save data to file $file!");
+            $dates_range = $this->getDatesInRange($export_start_date, $export_end_date);
+            foreach ($dates_range as $export_date) {
+                // Request sleep data from Basis for selected date. Note we're requesting all available data.
+                $sleep_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
+                    . 'type=sleep'
+                    . '&expand=activities.stages,activities.events';
+                
+                // Initialize the cURL resource and make api request
+                $ch = curl_init();
+                curl_setopt_array($ch, array(
+                    CURLOPT_URL => $sleep_url,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_COOKIEFILE => $this->cookie_jar
+                ));
+                $result = curl_exec($ch);
+                $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
+        
+                if ($response_code == '401') {
+                    throw new Exception("ERROR: Unauthorized!\n");
                     return false;
                 }
-                for ($i=0; $i<count($sleep); $i++) {
-                    // HH:MM:SS timestamp
-                    $start_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['start_time']);
-                    $end_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['end_time']);
-                    $row = array(
-                        $start_time, $sleep[$i]['start_time_iso'], $sleep[$i]['start_time_timezone'], 
-                        $sleep[$i]['start_time_offset'], $end_time, $sleep[$i]['end_time_iso'], 
-                        $sleep[$i]['end_time_timezone'], $sleep[$i]['end_time_offset'],
-                        $sleep[$i]['light_minutes'], $sleep[$i]['deep_minutes'], $sleep[$i]['rem_minutes'], 
-                        $sleep[$i]['interruption_minutes'], $sleep[$i]['unknown_minutes'],
-                        $sleep[$i]['interruptions'], $sleep[$i]['toss_and_turn'], $sleep[$i]['type'], 
-                        $sleep[$i]['actual_seconds'], $sleep[$i]['calories'], $sleep[$i]['heart_rate_avg'], 
-                        $sleep[$i]['heart_rate_min'], $sleep[$i]['heart_rate_max'], 
-                        $sleep[$i]['state'], $sleep[$i]['version'], $sleep[$i]['id']                    
+        
+                curl_close($ch);
+                
+                // Parse data from JSON response
+                $json = json_decode($result, true);
+        
+                // Create an array of sleep activities. Basis breaks up sleep into individual
+                // events if there is an interruption longer than 15 minutes.
+                $sleep = array();
+                $sleep_activities = $json['content']['activities'];
+                foreach ($sleep_activities as $sleep_activity) {
+                    // Add sleep event to array
+                    $sleep[] = array(
+                        'start_time'            => isset($sleep_activity['start_time']['timestamp']) ? $sleep_activity['start_time']['timestamp'] : '',
+                        'start_time_iso'        => isset($sleep_activity['start_time']['iso']) ? $sleep_activity['start_time']['iso'] : '',
+                        'start_time_timezone'   => isset($sleep_activity['start_time']['time_zone']['name']) ? $sleep_activity['start_time']['time_zone']['name'] : '',
+                        'start_time_offset'     => isset($sleep_activity['start_time']['time_zone']['offset']) ? $sleep_activity['start_time']['time_zone']['offset'] : '',
+                        'end_time'              => isset($sleep_activity['end_time']['timestamp']) ? $sleep_activity['end_time']['timestamp'] : '',
+                        'end_time_iso'          => isset($sleep_activity['end_time']['iso']) ? $sleep_activity['end_time']['iso'] : '',
+                        'end_time_timezone'     => isset($sleep_activity['end_time']['time_zone']['name']) ? $sleep_activity['end_time']['time_zone']['name'] : '',
+                        'end_time_offset'       => isset($sleep_activity['end_time']['time_zone']['offset']) ? $sleep_activity['end_time']['time_zone']['offset'] : '',
+                        'heart_rate_avg'        => isset($sleep_activity['heart_rate']['avg']) ? $sleep_activity['heart_rate']['avg'] : '',
+                        'heart_rate_min'        => isset($sleep_activity['heart_rate']['min']) ? $sleep_activity['heart_rate']['min'] : '',
+                        'heart_rate_max'        => isset($sleep_activity['heart_rate']['max']) ? $sleep_activity['heart_rate']['max'] : '',
+                        'actual_seconds'        => isset($sleep_activity['actual_seconds']) ? $sleep_activity['actual_seconds'] : '',
+                        'calories'              => isset($sleep_activity['calories']) ? $sleep_activity['calories'] : '',
+                        'light_minutes'         => isset($sleep_activity['sleep']['light_minutes']) ? $sleep_activity['sleep']['light_minutes'] : '',
+                        'deep_minutes'          => isset($sleep_activity['sleep']['deep_minutes']) ? $sleep_activity['sleep']['deep_minutes'] : '',
+                        'rem_minutes'           => isset($sleep_activity['sleep']['rem_minutes']) ? $sleep_activity['sleep']['rem_minutes'] : '',
+                        'interruption_minutes'  => isset($sleep_activity['sleep']['interruption_minutes']) ? $sleep_activity['sleep']['interruption_minutes'] : '',
+                        'unknown_minutes'       => isset($sleep_activity['sleep']['unknown_minutes']) ? $sleep_activity['sleep']['unknown_minutes'] : '',
+                        'interruptions'         => isset($sleep_activity['sleep']['interruptions']) ? $sleep_activity['sleep']['interruptions'] : '',
+                        'toss_and_turn'         => isset($sleep_activity['sleep']['toss_and_turn']) ? $sleep_activity['sleep']['toss_and_turn'] : '',
+                        'events'                => isset($sleep_activity['events']) ? $sleep_activity['events'] : '',
+                        'type'                  => isset($sleep_activity['type']) ? $sleep_activity['type'] : '',
+                        'state'                 => isset($sleep_activity['state']) ? $sleep_activity['state'] : '',
+                        'version'               => isset($sleep_activity['version']) ? $sleep_activity['version'] : '',
+                        'id'                    => isset($sleep_activity['id']) ? $sleep_activity['id'] : ''
                     );
-                    // Add row to csv file
-                    fputcsv($fp, $row);
                 }
-                fclose($fp);
-            }   else {
-                if (!file_put_contents($file, $result)) {
-                    throw new Exception("ERROR: Could not save data to file $file!");
-                    return false;
-                }
-            }        
+                $user_ids = $this->getStudyIds();
+                if ($export_format == 'html') {
+                    $html = $this->sleepToHTML($json);
+                    if (!file_put_contents($file, $html)) {
+                       throw new Exception("ERROR: Could not save data to file $file!");
+                       return false;
+                    }
+                } else if ($export_format == 'csv') {
+                    $fp = fopen($file, 'a'); //Open file for appending
+                    if(!$fp) {
+                        throw new Exception("ERROR: Could not save data to file $file!");
+                        return false;
+                    }
+                    for ($i=0; $i<count($sleep); $i++) {
+                        // HH:MM:SS timestamp
+                        $start_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['start_time']);
+                        $end_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['end_time']);
+                        $row = array(
+                            $user, $user_ids[$user],
+                            $start_time, $sleep[$i]['start_time_iso'], $sleep[$i]['start_time_timezone'], 
+                            $sleep[$i]['start_time_offset'], $end_time, $sleep[$i]['end_time_iso'], 
+                            $sleep[$i]['end_time_timezone'], $sleep[$i]['end_time_offset'],
+                            $sleep[$i]['light_minutes'], $sleep[$i]['deep_minutes'], $sleep[$i]['rem_minutes'], 
+                            $sleep[$i]['interruption_minutes'], $sleep[$i]['unknown_minutes'],
+                            $sleep[$i]['interruptions'], $sleep[$i]['toss_and_turn'], $sleep[$i]['type'], 
+                            $sleep[$i]['actual_seconds'], $sleep[$i]['calories'], $sleep[$i]['heart_rate_avg'], 
+                            $sleep[$i]['heart_rate_min'], $sleep[$i]['heart_rate_max'], 
+                            $sleep[$i]['state'], $sleep[$i]['version'], $sleep[$i]['id']                    
+                        );
+                        // Add row to csv file
+                        fputcsv($fp, $row);
+                    }
+                    fclose($fp);
+                }   else {
+                    if (!file_put_contents($file, $result)) {
+                        throw new Exception("ERROR: Could not save data to file $file!");
+                        return false;
+                    }
+                }        
+            }
         }
-
     }
 
 
@@ -457,16 +461,6 @@ class BasisExport
             return false;
         }
 
-        // Log into Basis account to authorize access.
-        if (empty($this->access_token)) {
-            try {
-                $this->doLogin();
-            } catch (Exception $e) {
-                echo 'Caught exception: ',  $e->getMessage(), "\n";
-                return false;
-            }
-        }
-
         if ($export_format == 'csv') {
             // Save results as .csv file
             $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-activities.csv';
@@ -476,6 +470,7 @@ class BasisExport
                 return false;
             }
             fputcsv($fp, array(
+                'username', 'user_id',
                 'start time', 'start time ISO', 'start time timezone', 'start time offset',
                 'end time', 'end time ISO', 'end time timezone', 'end time offset',
                 'type', 'actual seconds', 'steps', 'calories', 'minutes', 'heart rate avg', 'heart rate min', 'heart rate max',
@@ -489,99 +484,111 @@ class BasisExport
             // Save results as .json file
             $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-activities.json'; 
         }
-          
-        $dates_range = $this->getDatesInRange($export_start_date, $export_end_date);
-        foreach ($dates_range as $export_date) {
-            // Request activities data from Basis for selected date. Note we're requesting all available data.
-            $activities_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
-                . 'type=run,walk,bike'
-                . '&expand=activities';
-
-            // Initialize the cURL resource and make api request
-            $ch = curl_init();
-            curl_setopt_array($ch, array(
-                CURLOPT_URL => $activities_url,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_COOKIEFILE => $this->cookie_jar
-            ));
-            $result = curl_exec($ch);
-            $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
-
-            if ($response_code == '401') {
-                throw new Exception("ERROR: Unauthorized!\n");
+        
+        $accounts = $this->getAccounts();
+        foreach ($accounts as $user=>$pword) {
+           echo "Get activity data for user " . $user . "\n";     
+            try {
+                $this->doLogin($user, $pword);
+            } catch (Exception $e) {
+                echo 'Caught exception: ',  $e->getMessage(), "\n";
                 return false;
             }
-
-            curl_close($ch);
-
-            // Parse data from JSON response
-            $json = json_decode($result, true);
-
-            // Create an array of activities.
-            $activities = array();
-            $activity_items = $json['content']['activities'];
-            foreach ($activity_items as $activity_item) {
-                // Add activity to array
-                $activities[] = array(
-                    'start_time'            => isset($activity_item['start_time']['timestamp']) ? $activity_item['start_time']['timestamp'] : '',
-                    'start_time_iso'        => isset($activity_item['start_time']['iso']) ? $activity_item['start_time']['iso'] : '',
-                    'start_time_timezone'   => isset($activity_item['start_time']['time_zone']['name']) ? $activity_item['start_time']['time_zone']['name'] : '',
-                    'start_time_offset'     => isset($activity_item['start_time']['time_zone']['offset']) ? $activity_item['start_time']['time_zone']['offset'] : '',
-                    'end_time'              => isset($activity_item['end_time']['timestamp']) ? $activity_item['end_time']['timestamp'] : '',
-                    'end_time_iso'          => isset($activity_item['end_time']['iso']) ? $activity_item['end_time']['iso'] : '',
-                    'end_time_timezone'     => isset($activity_item['end_time']['time_zone']['name']) ? $activity_item['end_time']['time_zone']['name'] : '',
-                    'end_time_offset'       => isset($activity_item['end_time']['time_zone']['offset']) ? $activity_item['end_time']['time_zone']['offset'] : '',
-                    'heart_rate_avg'        => isset($activity_item['heart_rate']['avg']) ? $activity_item['heart_rate']['avg'] : '',
-                    'heart_rate_min'        => isset($activity_item['heart_rate']['min']) ? $activity_item['heart_rate']['min'] : '',
-                    'heart_rate_max'        => isset($activity_item['heart_rate']['max']) ? $activity_item['heart_rate']['max'] : '',
-                    'actual_seconds'        => isset($activity_item['actual_seconds']) ? $activity_item['actual_seconds'] : '',
-                    'calories'              => isset($activity_item['calories']) ? $activity_item['calories'] : '',
-                    'steps'                 => isset($activity_item['steps']) ? $activity_item['steps'] : '',
-                    'minutes'               => isset($activity_item['minutes']) ? $activity_item['minutes'] : '',
-                    'type'                  => isset($activity_item['type']) ? $activity_item['type'] : '',
-                    'state'                 => isset($activity_item['state']) ? $activity_item['state'] : '',
-                    'version'               => isset($activity_item['version']) ? $activity_item['version'] : '',
-                    'id'                    => isset($activity_item['id']) ? $activity_item['id'] : ''
-                );
-            }
-
-            if ($export_format == 'html') {
-                $html = $this->activitiesToHTML($json);
-                if (!file_put_contents($file, $html)) {
-                    throw new Exception("ERROR: Could not save data to file $file!");
+          
+            $dates_range = $this->getDatesInRange($export_start_date, $export_end_date);
+            foreach ($dates_range as $export_date) {
+                // Request activities data from Basis for selected date. Note we're requesting all available data.
+                $activities_url = 'https://app.mybasis.com/api/v2/users/me/days/' . $export_date . '/activities?'
+                    . 'type=run,walk,bike'
+                    . '&expand=activities';
+    
+                // Initialize the cURL resource and make api request
+                $ch = curl_init();
+                curl_setopt_array($ch, array(
+                    CURLOPT_URL => $activities_url,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_COOKIEFILE => $this->cookie_jar
+                ));
+                $result = curl_exec($ch);
+                $response_code = curl_getinfo ($ch, CURLINFO_HTTP_CODE);
+    
+                if ($response_code == '401') {
+                    throw new Exception("ERROR: Unauthorized!\n");
                     return false;
                 }
-            } else if ($export_format == 'csv') {
-                $fp = fopen($file, 'a'); 
-                if(!$fp) {
-                    throw new Exception("ERROR: Could not save data to file $file!");
-                    return false;
+    
+                curl_close($ch);
+    
+                // Parse data from JSON response
+                $json = json_decode($result, true);
+    
+                // Create an array of activities.
+                $activities = array();
+                $activity_items = $json['content']['activities'];
+                foreach ($activity_items as $activity_item) {
+                    // Add activity to array
+                    $activities[] = array(
+                        'start_time'            => isset($activity_item['start_time']['timestamp']) ? $activity_item['start_time']['timestamp'] : '',
+                        'start_time_iso'        => isset($activity_item['start_time']['iso']) ? $activity_item['start_time']['iso'] : '',
+                        'start_time_timezone'   => isset($activity_item['start_time']['time_zone']['name']) ? $activity_item['start_time']['time_zone']['name'] : '',
+                        'start_time_offset'     => isset($activity_item['start_time']['time_zone']['offset']) ? $activity_item['start_time']['time_zone']['offset'] : '',
+                        'end_time'              => isset($activity_item['end_time']['timestamp']) ? $activity_item['end_time']['timestamp'] : '',
+                        'end_time_iso'          => isset($activity_item['end_time']['iso']) ? $activity_item['end_time']['iso'] : '',
+                        'end_time_timezone'     => isset($activity_item['end_time']['time_zone']['name']) ? $activity_item['end_time']['time_zone']['name'] : '',
+                        'end_time_offset'       => isset($activity_item['end_time']['time_zone']['offset']) ? $activity_item['end_time']['time_zone']['offset'] : '',
+                        'heart_rate_avg'        => isset($activity_item['heart_rate']['avg']) ? $activity_item['heart_rate']['avg'] : '',
+                        'heart_rate_min'        => isset($activity_item['heart_rate']['min']) ? $activity_item['heart_rate']['min'] : '',
+                        'heart_rate_max'        => isset($activity_item['heart_rate']['max']) ? $activity_item['heart_rate']['max'] : '',
+                        'actual_seconds'        => isset($activity_item['actual_seconds']) ? $activity_item['actual_seconds'] : '',
+                        'calories'              => isset($activity_item['calories']) ? $activity_item['calories'] : '',
+                        'steps'                 => isset($activity_item['steps']) ? $activity_item['steps'] : '',
+                        'minutes'               => isset($activity_item['minutes']) ? $activity_item['minutes'] : '',
+                        'type'                  => isset($activity_item['type']) ? $activity_item['type'] : '',
+                        'state'                 => isset($activity_item['state']) ? $activity_item['state'] : '',
+                        'version'               => isset($activity_item['version']) ? $activity_item['version'] : '',
+                        'id'                    => isset($activity_item['id']) ? $activity_item['id'] : ''
+                    );
                 }
-                for ($i=0; $i<count($activities); $i++) {
-                    // HH:MM:SS timestamp
-                    $start_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['start_time']);
-                    $end_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['end_time']);
-                    $row = array(
-                        $start_time, $activities[$i]['start_time_iso'], $activities[$i]['start_time_timezone'], 
-                        $activities[$i]['start_time_offset'], $end_time, $activities[$i]['end_time_iso'], 
-                        $activities[$i]['end_time_timezone'], $activities[$i]['end_time_offset'],
-                        $activities[$i]['type'], $activities[$i]['actual_seconds'], $activities[$i]['steps'],
-                        $activities[$i]['calories'], $activities[$i]['minutes'], $activities[$i]['heart_rate_avg'], 
-                        $activities[$i]['heart_rate_min'], $activities[$i]['heart_rate_max'], $activities[$i]['state'],
-                        $activities[$i]['version'], $activities[$i]['id']
-                    );    
-                    // Add row to csv file
-                    fputcsv($fp, $row);
-                }
-                fclose($fp);
-            } else {
-                if (!file_put_contents($file, $result)) {
-                    throw new Exception("ERROR: Could not save data to file $file!");
-                    return false;
+    
+                $user_ids = $this->getStudyIds();
+                if ($export_format == 'html') {
+                    $html = $this->activitiesToHTML($json);
+                    if (!file_put_contents($file, $html)) {
+                        throw new Exception("ERROR: Could not save data to file $file!");
+                        return false;
+                    }
+                } else if ($export_format == 'csv') {
+                    $fp = fopen($file, 'a'); 
+                    if(!$fp) {
+                        throw new Exception("ERROR: Could not save data to file $file!");
+                        return false;
+                    }
+                    for ($i=0; $i<count($activities); $i++) {
+                        // HH:MM:SS timestamp
+                        $start_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['start_time']);
+                        $end_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['end_time']);
+                        $row = array(
+                            $user, $user_ids[$user],
+                            $start_time, $activities[$i]['start_time_iso'], $activities[$i]['start_time_timezone'], 
+                            $activities[$i]['start_time_offset'], $end_time, $activities[$i]['end_time_iso'], 
+                            $activities[$i]['end_time_timezone'], $activities[$i]['end_time_offset'],
+                            $activities[$i]['type'], $activities[$i]['actual_seconds'], $activities[$i]['steps'],
+                            $activities[$i]['calories'], $activities[$i]['minutes'], $activities[$i]['heart_rate_avg'], 
+                            $activities[$i]['heart_rate_min'], $activities[$i]['heart_rate_max'], $activities[$i]['state'],
+                            $activities[$i]['version'], $activities[$i]['id']
+                        );    
+                        // Add row to csv file
+                        fputcsv($fp, $row);
+                    }
+                    fclose($fp);
+                } else {
+                    if (!file_put_contents($file, $result)) {
+                        throw new Exception("ERROR: Could not save data to file $file!");
+                        return false;
+                    }
                 }
             }
         }
-
     }
 
     /**
@@ -923,6 +930,32 @@ HTML;
             array_push($days, $start -> format('Y-m-d'));
         }
         return $days;
+    }
+    
+    function getAccounts() 
+    {
+        $accounts = array();
+        $file = fopen(dirname(__FILE__) . "/users.csv", "r");
+        while(!feof($file))
+        {
+            $user = fgetcsv($file);
+            $accounts[$user[0]] = $user[1];
+        }
+        fclose($file);
+        return $accounts;
+    }
+    
+    function getStudyIds() 
+    {
+        $study_ids = array();
+        $file = fopen(dirname(__FILE__) . "/user_ids.csv", "r");
+        while(!feof($file))
+        {
+            $user = fgetcsv($file);
+            $study_ids[$user[0]] = $user[1];
+        }
+        fclose($file);
+        return $study_ids;
     }
 
 }
