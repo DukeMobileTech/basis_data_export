@@ -3,12 +3,14 @@
  *
  * Basis Data Export
  *
- * Utility that exports and saves your Basis device's uploaded sensor device data.
+ * Utility that exports and saves into a file sensor data from the Basis web site for specified accounts.
  * You can learn more about Basis at http://www.mybasis.com/
  *
- * @author Bob Troia <bob@quantifiedbob.com>
+ * Original @author Bob Troia <bob@quantifiedbob.com>
  * @link   http://www.quantifiedbob.com
  *
+ * Modified by @author Leonard Ng'eno
+ * 
 */
 
 class BasisExport
@@ -19,11 +21,8 @@ class BasisExport
     // Access token
     private $access_token;
 
-    // Data export date
-    public $export_date;
-
     // Acceptable export formats
-    private $export_formats = array('json', 'csv', 'html');
+    private $export_formats = array('json', 'csv');
 
     // These settings should be left as-is
     private $export_offset = 0; // don't pad export start/end times
@@ -99,32 +98,23 @@ class BasisExport
 
     /**
     * Retrieve user's biometric readings for given date and save to file
-    * @param string $export_date Date in YYYY-MM-DD format
-    * @param string $export_format Export type (json,csv,html)
+    * @param string $export_start_date Date in YYYY-MM-DD format
+     * @param string $export_end_date Date in YYYY-MM-DD format
+    * @param string $export_format Export type (json,csv)
     * @return bool
     * @throws Exception
     */
     function getMetrics($export_start_date = '', $export_end_date = '', $export_format = 'json')
     {
         // Check for YYYY-MM-DD start date format, else throw error
-        if (!isset($export_start_date)) {
-            // default to yesterday
-            $export_start_date = date('Y-m-d', strtotime('-1 day', time()));
-        } else {
-            $export_start_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_start_date);
-        }
+        $export_start_date = $this->getStartDate($export_start_date);
         if (!$this->isValidDate($export_start_date)) {
             throw new Exception('ERROR: Invalid date -  ' . $export_start_date . "\n");
             return false;
         }
         
         // Check for YYYY-MM-DD end date format, else throw error
-        if (!isset($export_end_date)) {
-            // default to today
-            $export_end_date = date('Y-m-d', strtotime('now', time()));
-        } else {
-            $export_end_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_end_date);
-        }
+        $export_end_date = $this->getEndDate($export_end_date);
         if (!$this->isValidDate($export_end_date)) {
             throw new Exception('ERROR: Invalid date -  ' . $export_end_date . "\n");
             return false;
@@ -145,10 +135,7 @@ class BasisExport
             return false;
         }
         
-        if ($export_format == 'html') {
-            // Save results as .html file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-metrics.html';
-        } else if ($export_format == 'csv') {   
+        if ($export_format == 'csv') {   
             // Save results as .csv file
             $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-metrics.csv';
             $fp = fopen($file, 'w');
@@ -212,13 +199,7 @@ class BasisExport
             $skintemps = $json['metrics']['skin_temp']['values'];
             $airtemps = $json['metrics']['air_temp']['values'];
                
-            if ($export_format == 'html') {
-                $html = $this->metricsToHTML($json);
-                if (!file_put_contents($file, $html)) {
-                    throw new Exception("ERROR: Could not save data to file $file!");
-                    return false;
-                }
-            } else if ($export_format == 'csv') {   
+            if ($export_format == 'csv') {   
                 $fp = fopen($file, 'a');
                 if(!$fp) {
                     throw new Exception("ERROR: Could not save data to file $file!");
@@ -245,32 +226,23 @@ class BasisExport
 
    /**
     * Retrieve user's sleep data for given date and save to file
-    * @param string $export_date Date in YYYY-MM-DD format
-    * @param string $export_format Export type (json,csv,html)
+    * @param string $export_start_date Date in YYYY-MM-DD format
+    * @param string $export_end_date Date in YYYY-MM-DD format
+    * @param string $export_format Export type (json,csv)
     * @return bool
     * @throws Exception
     */
     function getSleep($export_start_date = '', $export_end_date = '', $export_format = 'json')
     {
         // Check for YYYY-MM-DD start date format, else throw error
-        if (!isset($export_start_date)) {
-            // default to yesterday
-            $export_start_date = date('Y-m-d', strtotime('-1 day', time()));
-        } else {
-            $export_start_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_start_date);
-        }
+        $export_start_date = $this->getStartDate($export_start_date);
         if (!$this->isValidDate($export_start_date)) {
             throw new Exception('ERROR: Invalid date -  ' . $export_start_date . "\n");
             return false;
         }
         
         // Check for YYYY-MM-DD end date format, else throw error
-        if (!isset($export_end_date)) {
-            // default to today
-            $export_end_date = date('Y-m-d', strtotime('now', time()));
-        } else {
-            $export_end_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_end_date);
-        }
+        $export_end_date = $this->getEndDate($export_end_date);
         if (!$this->isValidDate($export_end_date)) {
             throw new Exception('ERROR: Invalid date -  ' . $export_end_date . "\n");
             return false;
@@ -299,9 +271,6 @@ class BasisExport
                 )
             );
             fclose($fp);
-        } else if ($export_format == 'html') {
-                // Save results as .html file
-                $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-sleep.html';
         } else {
             // Save results as .json file
             $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-sleep.json';
@@ -378,14 +347,9 @@ class BasisExport
                         'id'                    => isset($sleep_activity['id']) ? $sleep_activity['id'] : ''
                     );
                 }
+                
                 $user_ids = $this->getStudyIds();
-                if ($export_format == 'html') {
-                    $html = $this->sleepToHTML($json);
-                    if (!file_put_contents($file, $html)) {
-                       throw new Exception("ERROR: Could not save data to file $file!");
-                       return false;
-                    }
-                } else if ($export_format == 'csv') {
+                if ($export_format == 'csv') {
                     $fp = fopen($file, 'a'); //Open file for appending
                     if(!$fp) {
                         throw new Exception("ERROR: Could not save data to file $file!");
@@ -411,7 +375,7 @@ class BasisExport
                         fputcsv($fp, $row);
                     }
                     fclose($fp);
-                }   else {
+                } else {
                     if (!file_put_contents($file, $result)) {
                         throw new Exception("ERROR: Could not save data to file $file!");
                         return false;
@@ -423,33 +387,24 @@ class BasisExport
 
 
    /**
-    * Retrieve user's activity data for given date and save to file
-    * @param string $export_date Date in YYYY-MM-DD format
-    * @param string $export_format Export type (json,csv,html)
+    * Retrieve user's activity data for given dates and save to file
+    * @param string $export_start_date Date in YYYY-MM-DD format
+    * @param string $export_end_date Date in YYYY-MM-DD format
+    * @param string $export_format Export type (json,csv)
     * @return bool
     * @throws Exception
     */
     function getActivities($export_start_date = '', $export_end_date = '', $export_format = 'json')
     {
         // Check for YYYY-MM-DD start date format, else throw error
-        if (!isset($export_start_date)) {
-            // default to yesterday
-            $export_start_date = date('Y-m-d', strtotime('-1 day', time()));
-        } else {
-            $export_start_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_start_date);
-        }
+        $export_start_date = $this->getStartDate($export_start_date);
         if (!$this->isValidDate($export_start_date)) {
             throw new Exception('ERROR: Invalid date -  ' . $export_start_date . "\n");
             return false;
         }
 
         // Check for YYYY-MM-DD end date format, else throw error
-        if (!isset($export_end_date)) {
-            // default to today
-            $export_end_date = date('Y-m-d', strtotime('now', time()));
-        } else {
-            $export_end_date = preg_replace('/[^-a-zA-Z0-9_]/', '', $export_end_date);
-        }
+        $export_end_date = $this->getEndDate($export_end_date);
         if (!$this->isValidDate($export_end_date)) {
             throw new Exception('ERROR: Invalid date -  ' . $export_end_date . "\n");
             return false;
@@ -477,9 +432,6 @@ class BasisExport
                 'state', 'version', 'id'
                 )
             );
-        } else if ($export_format == 'html') {
-             // Save results as .html file
-            $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-activities.html';
         } else {
             // Save results as .json file
             $file = dirname(__FILE__) . '/data/basis-data-' . $export_start_date . '-' . $export_end_date . '-activities.json'; 
@@ -551,20 +503,14 @@ class BasisExport
                 }
     
                 $user_ids = $this->getStudyIds();
-                if ($export_format == 'html') {
-                    $html = $this->activitiesToHTML($json);
-                    if (!file_put_contents($file, $html)) {
-                        throw new Exception("ERROR: Could not save data to file $file!");
-                        return false;
-                    }
-                } else if ($export_format == 'csv') {
+                if ($export_format == 'csv') {
                     $fp = fopen($file, 'a'); 
                     if(!$fp) {
                         throw new Exception("ERROR: Could not save data to file $file!");
                         return false;
                     }
                     for ($i=0; $i<count($activities); $i++) {
-                        // HH:MM:SS timestamp
+                        // HH:MM:SS time stamp
                         $start_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['start_time']);
                         $end_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['end_time']);
                         $row = array(
@@ -611,7 +557,7 @@ class BasisExport
 
     /**
     * Checks whether date string is in YYYY-MM-DD format
-    * @param $str String contining date to check
+    * @param $str String containing date to check
     * @return bool
     */
     function isValidDate($str)
@@ -623,297 +569,49 @@ class BasisExport
         }
         return false;
     }
+    
+    /**
+    * Gets the start date in YYYY-MM-DD format
+    * Defaults to yesterday's date if $str is empty
+    * @param $str String containing start date
+    * @return String containing date in format Y-M-D
+    */
+    function getStartDate($str_date)
+    {
+        $date;
+        if (!isset($str_date)) {
+            // default to yesterday
+            $date = date('Y-m-d', strtotime('-1 day', time()));
+        } else {
+            $date = preg_replace('/[^-a-zA-Z0-9_]/', '', $str_date);
+        }
+        return $date;
+    }
 
     /**
-    * Generates an HTML summary of metrics data from json response.
-    * Yes, this function is *very* ugly. It's only included for legacy purposes
-    * and most likely you would never use this unless you want to open up
-    * something nicely formatted in a web browser.
-    * @param string $json JSON response from server
-    * @return string Formatted HTML summary
+    * Gets the end date in YYYY-MM-DD format
+    * Defaults to today's date if $str is empty
+    * @param $str String containing end date
+    * @return String containing date in format Y-M-D
     */
-    function metricsToHTML($json)
+    function getEndDate($str_date)
     {
-        $result = $json;
-        $report_timestamp = $json['starttime']; // report date, as UNIX timestamp
-        $report_date = strftime("%Y-%m-%d", $report_timestamp);
-        $heartrates = $json['metrics']['heartrate']['values'];
-        $steps = $json['metrics']['steps']['values'];
-        $calories = $json['metrics']['calories']['values'];
-        $gsrs = $json['metrics']['gsr']['values'];
-        $skintemps = $json['metrics']['skin_temp']['values'];
-        $airtemps = $json['metrics']['air_temp']['values'];
-
-        $html = <<<HTML
-<html>
-<head><title>My Metrics Data for {$report_date}</title>
-<style>
-body {
-font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
-font-size: 12px;
-}
-#my-data, #my-data-summary {
-font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
-font-size: 12px;
-background: #fff;
-width: 800px;
-border-collapse: collapse;
-text-align: left;
-margin: 20px;
-}
-#my-data th, #my-data-summary th {
-font-size: 14px;
-font-weight: normal;
-color: #039;
-border-bottom: 2px solid #6678b1;
-padding: 10px 8px;
-text-align: center;
-}
-#my-data td, #my-data-summary td {
-border-bottom: 1px solid #ccc;
-color: #669;
-padding: 6px 8px;
-text-align: center;
-}
-</style>
-</head>
-<body>
-
-    <h3>My Metrics Data for {$report_date}</h3>
-    <table id="my-data">
-    <thead>
-        <tr>
-            <th scope="col" id="reading">Reading</th>
-            <th scope="col" id="heartrate">Heartrate</th>
-            <th scope="col" id="steps">Steps</th>
-            <th scope="col" id="calories">Calories</th>
-            <th scope="col" id="gsr">GSR</th>
-            <th scope="col" id="skintemp">Skin Temp</th>
-            <th scope="col" id="airtemp">Air Temp</th>
-
-        </tr>
-    </thead>
-    <tbody>
-HTML;
-        // Format and echo data to browser
-        for ($i=0; $i<count($heartrates); $i++) {
-            // HH:MM:SS timestamp
-            $timestamp = strftime("%Y-%m-%d %H:%M:%S", mktime(0, 0, $i*$this->export_interval, date("n", $report_timestamp), date("j", $report_timestamp), date("Y", $report_timestamp)));
-
-            $html .= '<tr>';
-            $html .= '<td>' . $timestamp . '</td>';
-            $html .= '<td>' . ($heartrates[$i] == '' ? 'null' : $heartrates[$i]) . '</td>';
-            $html .= '<td>' . ($steps[$i] == '' ? 'null' : $steps[$i]) . '</td>';
-            $html .= '<td>' . ($calories[$i] == '' ? 'null' : $calories[$i]) . '</td>';
-            $html .= '<td>' . ($gsrs[$i] == '' ? 'null' : $gsrs[$i]) . '</td>';
-            $html .= '<td>' . ($skintemps[$i] == '' ? 'null' : $skintemps[$i]) . '</td>';
-            $html .= '<td>' . ($airtemps[$i] == '' ? 'null' : $airtemps[$i]) . '</td>';
-            $html .= '</tr>';
+        $date;
+        if (!isset($str_date)) {
+            // default to today
+            $date = date('Y-m-d', strtotime('now', time()));
+        } else {
+            $date = preg_replace('/[^-a-zA-Z0-9_]/', '', $str_date);
         }
-        $html .= <<<HTML
-    </tbody>
-    </table>
-</body>
-</html>
-HTML;
-        return $html;
-
-    } // end metricsToHTML
+        return $date;
+    }
 
     /**
-    * Generates an HTML summary of sleep data from json response.
-    * Yes, this function is *very* ugly. It's only included for legacy purposes
-    * and most likely you would never use this unless you want to open up
-    * something nicely formatted in a web browser.
-    * @param string $json JSON response from server
-    * @return string Formatted HTML summary
-    */
-    function sleepToHTML($json)
-    {
-        $report_date = strftime("%Y-%m-%d", $json['content']['activities'][0]['start_time']['timestamp']);
-        $html = <<<HTML
-<html>
-<head><title>My Sleep Data for {$report_date}</title>
-<style>
-body {
-font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
-font-size: 12px;
-}
-#my-data, #my-data-summary {
-font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
-font-size: 12px;
-background: #fff;
-width: 800px;
-border-collapse: collapse;
-text-align: left;
-margin: 20px;
-}
-#my-data th, #my-data-summary th {
-font-size: 14px;
-font-weight: normal;
-color: #039;
-border-bottom: 2px solid #6678b1;
-padding: 10px 8px;
-text-align: center;
-}
-#my-data td, #my-data-summary td {
-border-bottom: 1px solid #ccc;
-color: #669;
-padding: 6px 8px;
-text-align: center;
-}
-</style>
-</head>
-<body>
-    <h3>My Sleep Data for {$report_date}</h3>
-    <table id="my-data">
-    <thead>
-        <tr>
-            <th scope="col" id="start-time">Start Time</th>
-            <th scope="col" id="end-time">End Time</th>
-            <th scope="col" id="hr-avg">Heart Rate Avg</th>
-            <th scope="col" id="hr-min">Heart Rate Min</th>
-            <th scope="col" id="hr-max">Heart Rate Max</th>
-            <th scope="col" id="cals">Calories</th>
-            <th scope="col" id="actual-secs">Actual Secs</th>
-            <th scope="col" id="light-mins">Light Mins</th>
-            <th scope="col" id="deep-mins">Deep Mins</th>
-            <th scope="col" id="rem-mins">REM Mins</th>
-            <th scope="col" id="inter-mins">Interruption Mins</th>
-            <th scope="col" id="unknown-mins">Unknown Mins</th>
-            <th scope="col" id="interrupts">Interruptions</th>
-            <th scope="col" id="toss-turns">Toss Turns</th>
-        </tr>
-    </thead>
-    <tbody>
-HTML;
-
-        $sleep = $json['content']['activities'];
-        // Format and echo data to browser
-        for ($i=0; $i<count($sleep); $i++) {
-            $start_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['start_time']['timestamp']);
-            $end_time = strftime("%Y-%m-%d %H:%M:%S", $sleep[$i]['end_time']['timestamp']);
-            $html .= '<tr>';
-            $html .= '<td>' . $start_time . '</td>';
-            $html .= '<td>' . $end_time . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['heart_rate']['avg']) ? $sleep[$i]['heart_rate']['avg'] : '-') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['heart_rate']['min']) ? $sleep[$i]['heart_rate']['min'] : '-') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['heart_rate']['max']) ? $sleep[$i]['heart_rate']['max'] : '-') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['calories']) ? $sleep[$i]['calories'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['actual_seconds']) ? $sleep[$i]['actual_seconds'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['sleep']['light_minutes']) ? $sleep[$i]['sleep']['light_minutes'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['sleep']['deep_minutes']) ? $sleep[$i]['sleep']['deep_minutes'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['sleep']['rem_minutes']) ? $sleep[$i]['sleep']['rem_minutes'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['sleep']['interruption_minutes']) ? $sleep[$i]['sleep']['interruption_minutes'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['sleep']['unknown_minutes']) ? $sleep[$i]['sleep']['unknown_minutes'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['sleep']['interruptions']) ? $sleep[$i]['sleep']['interruptions'] : '0') . '</td>';
-            $html .= '<td>' . (isset($sleep[$i]['sleep']['toss_and_turn']) ? $sleep[$i]['sleep']['toss_and_turn'] : '0') . '</td>';
-            $html .= '</tr>';
-        }
-        $html .= <<<HTML
-    </tbody>
-    </table>
-</body>
-</html>
-HTML;
-        return $html;
-
-    } // end sleepToHTML
-
-    /**
-    * Generates an HTML summary of activities data from json response.
-    * Yes, this function is *very* ugly. It's only included for legacy purposes
-    * and most likely you would never use this unless you want to open up
-    * something nicely formatted in a web browser.
-    * @param string $json JSON response from server
-    * @return string Formatted HTML summary
-    */
-    function activitiesToHTML($json)
-    {
-        $report_date = strftime("%Y-%m-%d", $json['content']['activities'][0]['start_time']['timestamp']);
-
-        $html = <<<HTML
-<html>
-<head><title>My Activity Data for {$report_date}</title>
-<style>
-body {
-font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
-font-size: 12px;
-}
-#my-data, #my-data-summary {
-font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
-font-size: 12px;
-background: #fff;
-width: 800px;
-border-collapse: collapse;
-text-align: left;
-margin: 20px;
-}
-#my-data th, #my-data-summary th {
-font-size: 14px;
-font-weight: normal;
-color: #039;
-border-bottom: 2px solid #6678b1;
-padding: 10px 8px;
-text-align: center;
-}
-#my-data td, #my-data-summary td {
-border-bottom: 1px solid #ccc;
-color: #669;
-padding: 6px 8px;
-text-align: center;
-}
-</style>
-</head>
-<body>
-    <h3>My Activity Data for {$report_date}</h3>
-    <table id="my-data">
-    <thead>
-        <tr>
-            <th scope="col" id="start-time">Start Time</th>
-            <th scope="col" id="end-time">End Time</th>
-            <th scope="col" id="hr-avg">Heart Rate Avg</th>
-            <th scope="col" id="hr-min">Heart Rate Min</th>
-            <th scope="col" id="hr-max">Heart Rate Max</th>
-            <th scope="col" id="actual-secs">Actual Secs</th>
-            <th scope="col" id="cals">Calories</th>
-            <th scope="col" id="steps">Steps</th>
-            <th scope="col" id="mins">Minutes</th>
-            <th scope="col" id="type">Type</th>
-        </tr>
-    </thead>
-    <tbody>
-HTML;
-        $activities = $json['content']['activities'];
-
-        // Format and echo data to browser
-        for ($i=0; $i<count($activities); $i++) {
-            $start_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['start_time']['timestamp']);
-            $end_time = strftime("%Y-%m-%d %H:%M:%S", $activities[$i]['end_time']['timestamp']);
-            $html .= '<tr>';
-            $html .= '<td>' . $start_time . '</td>';
-            $html .= '<td>' . $end_time . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['heart_rate']['avg']) ? $activities[$i]['heart_rate']['avg'] : '-') . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['heart_rate']['min']) ? $activities[$i]['heart_rate']['min'] : '-') . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['heart_rate']['max']) ? $activities[$i]['heart_rate']['max'] : '-') . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['actual_seconds']) ? $activities[$i]['actual_seconds'] : '0') . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['calories']) ? $activities[$i]['calories'] : '0') . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['steps']) ? $activities[$i]['steps'] : '0') . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['minutes']) ? $activities[$i]['minutes'] : '0') . '</td>';
-            $html .= '<td>' . (isset($activities[$i]['type']) ? $activities[$i]['type'] : '') . '</td>';
-            $html .= '</tr>';
-        }
-        $html .= <<<HTML
-    </tbody>
-    </table>
-</body>
-</html>
-HTML;
-        return $html;
-
-    } // end activitiesToHTML
-
-    //Get days between two dates - inclusive
+     * Get days between two dates - inclusive
+     * @param $start_date String containing beginning date
+     * @param $end_date String containing ending date
+     * @return Array of dates in format Y-m-d
+     */
     function getDatesInRange($start_date, $end_date) 
     {
         $start = new DateTime($start_date);
@@ -932,6 +630,10 @@ HTML;
         return $days;
     }
     
+    /**
+     * Get usernames and passwords of Basis accounts from a csv file
+     * @return Array with usernames as keys and passwords as values
+     */
     function getAccounts() 
     {
         $accounts = array();
@@ -945,6 +647,10 @@ HTML;
         return $accounts;
     }
     
+    /**
+     * Get pre-assigned user ids for each Basis username from a csv file
+     * @return Array with usernames as keys and passwords as values
+     */
     function getStudyIds() 
     {
         $study_ids = array();
@@ -959,5 +665,5 @@ HTML;
     }
 
 }
- // end class BasisExport
+
 ?>
