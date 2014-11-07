@@ -1,20 +1,19 @@
 # Basis Data Export
 
-Utility that exports and saves your Basis B1 device's uploaded sensor data.
+Utility that exports and saves your Basis B1 devices' uploaded sensor data.
 You can learn more about Basis at [http://www.mybasis.com/](http://www.mybasis.com/)
 
 ## Instructions
 
-In order to use this script, you must already have a Basis account (and a Basis B1 band).
+In order to use this script, you must already have at least one Basis account (and a Basis B1 band).
 
 ### Usage:
-This script can be run several ways. You can (and should probably) first edit the `BASIS_USERNAME`, `BASIS_PASSWORD`, and `BASIS_EXPORT_FORMAT` values under "Settings" in the file `basisdataexport.php` so you don't have to specify those values every time the script is run. Make sure the `data/` folder is writable!
-
-![basis export config](http://www.quantifiedbob.com/images/basis-screenshots/basis-export-screenshot-config.png)
+This script can be run several ways. 
+You should put the usernames and passwords of the Basis accounts you want to download data from in a file called users.csv. Each pair of username and password should be in its own line and be comma separated. 
+You should enter the `BASIS_EXPORT_FORMAT` value in the file `basisdataexport.php` so you don't have to specify the value every time the script is run. 
+Make sure the `data/` folder is writable!
 
 ### Method 1 - Interactive Mode
-
-![basis export option 1](http://www.quantifiedbob.com/images/basis-screenshots/basis-export-screenshot-1.png)
 
 1. Open a terminal window and cd to this script's directory
 2. Type `php basisdataexport.php`
@@ -24,23 +23,17 @@ This script can be run several ways. You can (and should probably) first edit th
 
 ### Method 2 - Via command-line arguments (useful for crons)
 
-![basis export option 2](http://www.quantifiedbob.com/images/basis-screenshots/basis-export-screenshot-2.png)
+    $ php basisdataexport.php -s2014-11-01 -e2014-11-05 -fcsv
 
-Usage `php basisdataexport.php -h -u[username] -p[pass] -d[YYYY-MM-DD] -f[json|csv|html]`
+Usage `php basisdataexport.php -h -s[YYYY-MM-DD] -e[YYYY-MM-DD] -f[json|csv]`
 ```
 Options:
-  -u  Basis username (if not used, defaults to BASIS_USERNAME)
-  -p  Basis password (if not used, defaults to BASIS_PASSWORD)
-  -d  Data export date (YYYY-MM-DD) (if not used, defaults to current date)
-  -f  Data export format (json|csv|html) (if not used, defaults to json)
+  -s Data export start date (YYYY-MM-DD) (if not used, defaults to yesterday's date)
+  -e Data export end date (YYYY-MM-DD) (if not used, defaults to current date)
+  -f  Data export format (json|csv) (if not used, defaults to json)
   -h  Show this help text
 ```
 Make sure there are no spaces between any flags and values!
-
-### Method 3 - Via web browser
-This requires that the scripts are in a location that is executable via a web server.
-
-`http://localhost/basis-data-export/basisdataexport.php?u=[basis_username]&p=[basis_password]&d=[YYYY-MM-DD]&f=[format]`
 
 ## Saving Your Data
 If the script runs successfully, your data will be saved in the `data/` folder. Files are saved in the format `basis-data-[YYYY-MM-DD].[format]` (i.e., `basis-data-2014-04-04.json`).
