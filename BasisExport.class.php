@@ -25,7 +25,6 @@ class BasisExport
     private $export_formats = array('json', 'csv');
 
     // These settings should be left as-is
-    private $export_offset = 0; // don't pad export start/end times
     private $export_interval = 60; // data granularity (60 = 1 reading per minute)
 
     // Used for cURL cookie storage (needed for api access)
@@ -164,7 +163,6 @@ class BasisExport
             $metrics_url = 'https://app.mybasis.com/api/v1/metrics/me?'
                 . 'start=' .strtotime($export_start_date)
                 .'&end=' .$export_end_date_mod
-                . '&padding=' . $this->export_offset
                 . '&heartrate=true'
                 . '&steps=true'
                 . '&calories=true'
@@ -209,9 +207,11 @@ class BasisExport
                 for ($i=0; $i<count($heartrates); $i++) {
                     // HH:MM:SS timestamp
                     $timestamp = strftime("%Y-%m-%d %H:%M:%S", mktime(0, 0, $i*$this->export_interval, date("n", $report_date), date("j", $report_date), date("Y", $report_date)));                    
-                    $row = array($user, $study_ids[$user], $timestamp, $heartrates[$i], $steps[$i], $calories[$i], $gsrs[$i], $skintemps[$i], $airtemps[$i]);
-                    // Add row to csv file
-                    fputcsv($fp, $row);
+                    if (!($heartrates[$i] === NULL) && !($gsrs[$i] === NULL)) {
+                        $row = array($user, $study_ids[$user], $timestamp, $heartrates[$i], $steps[$i], $calories[$i], $gsrs[$i], $skintemps[$i], $airtemps[$i]);
+                        // Add row to csv file
+                        fputcsv($fp, $row);
+                    }
                 }
                 fclose($fp);
             } else {
